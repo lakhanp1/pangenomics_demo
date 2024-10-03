@@ -1,0 +1,416 @@
+---
+title: "Exploring PanTools output"
+date: "`r Sys.time()`"
+format: 
+  html: 
+    embed-resources: true
+    df-print: paged
+knitr: 
+  opts_chunk:
+    fig.height: 7
+---
+
+## Setup
+
+During our annual surveys, we detected 3 *P. brasiliense* isolates (NAK616, 
+NAK617 and JGAR-120719-4) which were negative for blackleg diagnosis assays.
+However, these three isolates induced blackleg during the subsequent field trials.
+
+
+```{r}
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(here))
+suppressPackageStartupMessages(library(ape))
+suppressPackageStartupMessages(library(ggtree))
+suppressPackageStartupMessages(library(treeio))
+suppressPackageStartupMessages(library(tidytree))
+suppressPackageStartupMessages(library(DT))
+suppressPackageStartupMessages(library(matrixStats))
+suppressPackageStartupMessages(library(ComplexHeatmap))
+
+rm(list = ls())
+
+source("https://raw.githubusercontent.com/lakhanp1/Pectobacterium_pangenome/refs/heads/main/scripts/utils/phylogeny_functions.R")
+source("scripts/utils/heatmap_utils.R")
+################################################################################
+set.seed(124)
+
+pangenome <- here::here("data/pangenomes/pecto_demo/pecto_demo.DB")
+file_metadata <- here::here("data/pangenomes/pecto_demo/genomes_metadata.csv")
+
+outgroup <- "g_23"
+
+dir.create(path = "analysis/phylogeny", showWarnings = FALSE, recursive = TRUE)
+```
+
+## Explore metadata
+
+```{r}
+#| echo: false
+#| column: screen-inset-right
+#| label: metadata-tbl
+#| tbl-cap: Pangenome metadata table
+#| out-height: "400px"
+
+sampleInfo <- suppressMessages(readr::read_csv(file_metadata)) %>% 
+  dplyr::mutate(
+    SpeciesName =  stringi::stri_replace(
+      str = SpeciesName, regex =  paste("(Pectobacterium )(?!sp\\.)", sep = ""), replacement = "P. "
+    ),
+    nodeLabs = stringr::str_c(
+      stringi::stri_sprintf(format = "%-4s", genomeId), "| ",
+      SpeciesName," | ", sampleName,
+      sep = ""
+    )
+  ) %>% 
+  dplyr::select(Genome, genomeId, SpeciesName, sampleId, dplyr::everything())
+
+DT::datatable(
+  data = sampleInfo,
+  rownames = FALSE,
+  filter = "top",
+  class = 'compact hover',
+  extensions = c('KeyTable', 'Scroller', 'Select', 'SearchBuilder', 'FixedColumns'),
+  options = list(
+    autoWidth = FALSE,
+    dom = 'Qlfrtip',
+    scrollX = TRUE,
+    fixedColumns = list(leftColumns = 2),
+    keys = TRUE,
+    scroller = TRUE,
+    scrollY = 600
+  ),
+  selection = 'none'
+)
+```
+
+## Phylogeny analysis
+
+### Generate k-mer tree
+
+```{r}
+file_kmer_dist <- paste(pangenome, "/kmer_classification.100.0/distances_for_tree/genome_mash_distance.csv", sep = "")
+
+kmer_dist <- suppressMessages(readr::read_csv(file_kmer_dist)) %>% 
+  dplyr::mutate(
+    genomeId = paste("g_", Genomes, sep = ""), .before = Genomes
+  ) %>% 
+  dplyr::select(-Genomes) %>% 
+  dplyr::rename_with(.fn = ~ paste("g_", .x, sep = ""), .cols = -genomeId)
+
+dist_mat <- tibble::column_to_rownames(kmer_dist, var = "genomeId") %>%
+  as.matrix() %>%
+  as.dist()
+
+## store UPGMA and NJ trees
+# plot(hclust(dist_mat))
+upgma_tree <- ape::as.phylo(hclust(d = dist_mat, method = "average")) %>%
+  ape::ladderize(right = FALSE) %>%
+  ape::makeNodeLabel(method = "number", prefix = "n")
+
+# store tree in BEAST format
+treeio::write.beast(
+  treedata = tidytree::as.treedata(upgma_tree), tree.name = "upgma_tree",
+  file = "analysis/phylogeny/kmer_upgma.rooted.nexus"
+)
+
+```
+
+Let us quickly visualize phylogenetic tree.
+
+::: scrolling_y
+```{r}
+#| fig-height: 12
+
+plot(upgma_tree)
+```
+:::
+
+Based on the *k*-mer UPGMA tree, `g_23` is distinct compared to other species.
+Therefore, we generate a neighbor joining tree and root our tree using the `ape`
+package.
+
+```{r}
+nj_tree <- ape::nj(dist_mat) %>%
+  ape::ladderize(right = FALSE) %>%
+  ape::makeNodeLabel(method = "number", prefix = "n")
+
+## set negative length edges => 0
+nj_tree$edge.length[nj_tree$edge.length < 0] <- 0
+
+# store tree in BEAST format
+treeio::write.beast(
+  treedata = tidytree::as.treedata(nj_tree), tree.name = "nj_tree",
+  file = "analysis/phylogeny/kmer_nj.nexus"
+)
+
+
+rooted_nj_tree <- ape::root(
+  phy = nj_tree, outgroup = outgroup,
+  edgelabel = TRUE, resolve.root = TRUE
+) %>%
+  ape::ladderize(right = FALSE) %>%
+  ape::makeNodeLabel(method = "number", prefix = "n")
+
+# store tree in BEAST format
+treeio::write.beast(
+  treedata = tidytree::as.treedata(rooted_nj_tree), tree.name = "rooted_nj_tree",
+  file = "analysis/phylogeny/kmer_nj.rooted.nexus"
+)
+
+```
+
+### Phylogeny visualization
+
+```{r}
+## add data to tree
+tree_tbl <- tidytree::as_tibble(rooted_nj_tree) %>%
+  dplyr::full_join(y = sampleInfo, by = c("label" = "genomeId")) %>%
+  treeio::as.treedata()
+
+pt_tree <- ggtree::ggtree(tr = tree_tbl, color="black", size = 0.7) +
+  ggtree::geom_nodelab(
+    mapping = aes(label = label),
+    node = "internal", size = 5, hjust = 1.5, color = "red"
+  ) +
+  ggtree::geom_tiplab(
+    mapping = aes(label = nodeLabs),
+    size = 5, align = TRUE, linesize = 0.5
+  ) +
+  scale_x_continuous(expand = expansion(mult = c(0.05, 0.4)))
+
+```
+
+::: scrolling_y
+
+```{r}
+#| column: page-inset-right
+#| fig-height: 14
+#| fig-width: 14
+#| out-width: '100%'
+#| layout-valign: top
+#| echo: false
+
+pt_tree
+
+```
+:::
+
+Extract and save the species order along the phylogenetic tree for subsequent 
+analysis.
+
+```{r}
+tree_taxa_order <- tibble:::enframe(
+  ggtree::get_taxa_name(pt_tree), name = "tipOrder", value = "genomeId"
+) %>%
+  dplyr::left_join(y = sampleInfo, by = "genomeId") %>% 
+  dplyr::group_by(SpeciesName) %>% 
+  dplyr::slice(1L) %>%
+  dplyr::ungroup() %>%
+  dplyr::arrange(tipOrder) %>% 
+  dplyr::pull(SpeciesName)
+
+readr::write_tsv(
+  x = tibble::tibble(SpeciesName = tree_taxa_order),
+  file = "analysis/phylogeny/kmer_nj.taxa_order.txt"
+)
+
+sampleInfo %<>% dplyr::mutate(
+  SpeciesName = forcats::fct_relevel(SpeciesName, !!!tree_taxa_order)
+)
+```
+
+The newly detected isolates are clustered under one node `n20` and all
+*P. brasiliense* isolates are clustered under node `n13` in the *k*-mer tree.
+
+## Analyze specific genomes using homology groups
+
+```{r}
+# clade_comparison_confs(
+#   tree = "analysis/phylogeny/kmer_nj.rooted.nexus",
+#   node = "n20",
+#   against = "n13",
+#   type = "node",
+#   name = "FN-Pbr")
+
+compare_tips <- tidytree::offspring(
+  .data = as_tibble(rooted_nj_tree),
+  .node = "n20", tiponly = TRUE
+) %>%
+  dplyr::pull(label)
+
+against_tips <- tidytree::offspring(
+  .data = as_tibble(rooted_nj_tree),
+  .node = "n13", tiponly = TRUE
+) %>%
+  dplyr::pull(label)
+
+against_tips <- setdiff(against_tips, compare_tips)
+```
+
+Genomes under node `n20`: `r paste0(compare_tips, collapse = ";")`
+
+Genomes under node `n13`: `r paste0(against_tips, collapse = ";")`
+
+### Homology group matrix
+
+```{r}
+#| code-fold: true
+
+#' extract homology groups for set of genomes in pangenome
+#'
+#' @param file pangenome homology group file
+#' @param genomes genomes to select for
+#' @param groups group category to return. One of `c("core", "accessory",
+#'  "unique", "all")`. default: "all"
+#' @param pav Whether to convert homology group count >1 to 1 i.e. output
+#' binary PAV matrix. Default: FALSE
+#'
+#' @return A homology group tibble
+#' @export
+#'
+#' @examples NA
+homology_groups_extract <- function(file, genomes, groups = "all", pav = FALSE) {
+  stopifnot(
+    groups %in% c("core", "accessory", "unique", "all")
+  )
+  
+  ## homology groups PAV matrix
+  hgs <- suppressMessages(readr::read_csv(file)) %>%
+    dplyr::rename_with(.fn = ~ stringr::str_replace_all(.x, "( |-)", "_")) %>%
+    dplyr::rename_with(.fn = ~ stringr::str_replace_all(.x, "Genome_", "g_")) %>%
+    dplyr::rename_with(.fn = ~ tolower(.x)) %>%
+    dplyr::mutate(
+      homology_group_node_id = paste("hg_", homology_group_node_id, sep = "")
+    ) %>%
+    dplyr::select(hg = homology_group_node_id, tidyselect::all_of(genomes))
+  
+  ## binary matrix for homology_group PAV
+  hgBinaryMat <- dplyr::mutate(
+    hgs,
+    dplyr::across(
+      .cols = tidyselect::all_of(genomes),
+      .fns = ~ dplyr::if_else(.x > 1, true = 1, false = .x)
+    )
+  ) %>%
+    tibble::column_to_rownames(var = "hg") %>%
+    as.matrix()
+  
+  hgSum <- matrixStats::rowSums2(
+    x = hgBinaryMat, useNames = T
+  ) %>%
+    tibble::enframe(name = "hg", value = "nGenomes") %>%
+    dplyr::filter(nGenomes != 0) %>%
+    dplyr::mutate(
+      class = dplyr::case_when(
+        nGenomes == 1 ~ "unique",
+        nGenomes == !!nrow(sampleInfo) ~ "core",
+        nGenomes < !!nrow(sampleInfo) & nGenomes > 1 ~ "accessory"
+      )
+    )
+  
+  if (groups != "all") {
+    hgSum %<>% dplyr::filter(class == .env$groups)
+  }
+  
+  if (pav) {
+    hgs <- tibble::as_tibble(hgBinaryMat, rownames = "hg")
+  }
+  
+  hgSet <- dplyr::left_join(hgSum, hgs, by = "hg") %>%
+    dplyr::select(-nGenomes)
+  
+  return(hgSet)
+}
+
+```
+
+```{r}
+file_hgs <- paste(pangenome, "/gene_classification.100.0/classified_groups.csv", sep = "")
+
+hg_pav <- homology_groups_extract(file = file_hgs, genomes = sampleInfo$genomeId, pav = TRUE)
+
+table(hg_pav$class)
+```
+
+```{r}
+pav_mat <- dplyr::select(hg_pav, -class) %>% 
+  tibble::column_to_rownames(var = "hg") %>% 
+  as.matrix() %>% 
+  t()
+
+str(pav_mat)
+```
+```{r}
+matrixStats::colSums2(pav_mat) %>% 
+  hist(
+    breaks = 25,
+    xlab = "Number of genomes with Y homology groups",
+    ylab = "Count of homology groups",
+    main = NULL
+  )
+```
+
+### Node specific HGs + visualization
+
+```{r}
+specific_hgs <- dplyr::left_join(
+  x = tibble::enframe(
+    x = matrixStats::colSums2(pav_mat[compare_tips, ]), value = "compare"
+  ),
+  y = tibble::enframe(
+    x = matrixStats::colSums2(pav_mat[against_tips, ]), value = "against"
+  ),
+  by = "name"
+) %>% 
+  dplyr::filter(compare == 3, against == 0) %>% 
+  dplyr::rename(hg_id = name)
+
+specific_hgs
+```
+
+```{r}
+ht_sp <- species_key_heatmap(
+  genomes = ordered_tips_phylo(phy = upgma_tree),
+  speciesInfo = sampleInfo,
+  markGenomes = list(
+    compare = list(genomes = compare_tips, color = "red"),
+    against = list(genomes = against_tips, color = "green")
+  )
+)
+
+ht_sp@heatmap_param$width <- unit(12, "cm")
+
+```
+
+
+```{r}
+#| column: page
+#| fig-width: 14
+#| fig-height: 10
+#| out-width: 100%
+
+ht_hgs <- homology_group_heatmap(
+  mat = pav_mat[, specific_hgs$hg_id],
+  name = "hgs",
+  phy = upgma_tree,
+  speciesInfo = sampleInfo,
+  markGenomes = list(
+    compare = list(genomes = compare_tips, color = "red"),
+    against = list(genomes = against_tips, color = "green")
+  ),
+  use_raster = TRUE, raster_quality = 3
+)
+
+ht_hgs@ht_list$species_key@heatmap_param$width <- unit(12, "cm")
+ht_hgs@ht_list$hgs@heatmap_param$width <- unit(15, "cm")
+ht_hgs@ht_list$hgs@column_names_param$show <- FALSE
+ht_hgs@ht_list$hgs@row_names_param$show <- TRUE
+
+ComplexHeatmap::draw(object = ht_hgs, heatmap_legend_side = "bottom")
+```
+
+
+
+
+

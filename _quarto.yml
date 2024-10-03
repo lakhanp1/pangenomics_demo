@@ -1,0 +1,20 @@
+author: "Lakhansing Pardeshi"
+project:
+  title: "Pectobacterium pangenome data analysis"
+  # type: website
+  # output-dir: "./docs"
+  execute-dir: project
+execute:
+  freeze: true # never re-render during project render
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    embed-resources: true
+    html-math-method: katex
+    code-fold: show
+    code-tools: true
+    code-overflow: scroll
+    code-copy: true
+    code-line-numbers: true
+    css: ./scripts/utils/quarto_style.css
