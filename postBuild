@@ -1,4 +1,4 @@
-#!/usr/bin/env bash -v
+#!/usr/bin/env bash
 
 # determine which version of Quarto to install
 QUARTO_VERSION=1.5.57
@@ -12,13 +12,13 @@ fi
 
 if [ $QUARTO_JSON != "" ]; then
 
-# create a python script and run it
-PYTHON_SCRIPT=_quarto_version.py
-if [ -e $PYTHON_SCRIPT ]; then
-	rm -rf $PYTHON_SCRIPT
-fi
+	# create a python script and run it
+	PYTHON_SCRIPT=_quarto_version.py
+	if [ -e $PYTHON_SCRIPT ]; then
+		rm -rf $PYTHON_SCRIPT
+	fi
 
-cat > $PYTHON_SCRIPT <<EOF
+	cat >$PYTHON_SCRIPT <<EOF
 import urllib, json
 
 import urllib.request, json
@@ -28,11 +28,10 @@ with urllib.request.urlopen("https://quarto.org/docs/download/${QUARTO_JSON}") a
 
 EOF
 
-QUARTO_VERSION=$(python $PYTHON_SCRIPT)
-rm -rf $PYTHON_SCRIPT
+	QUARTO_VERSION=$(python $PYTHON_SCRIPT)
+	rm -rf $PYTHON_SCRIPT
 
 fi
-
 
 echo
 echo Installing Quarto $QUARTO_VERSION
@@ -49,7 +48,6 @@ ln -s ~/.quarto/opt/quarto/bin/quarto ~/.local/bin/quarto
 
 # create the proper pandoc symlink to enable visual editor in Quarto extension
 ln -s ~/.quarto/opt/quarto/bin/tools/x86_64/pandoc ~/.quarto/opt/quarto/bin/tools/pandoc
-
 
 echo
 echo Installed Quarto

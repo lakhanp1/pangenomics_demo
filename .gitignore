@@ -33,3 +33,5 @@ extracted_data
 .vscode
 /.quarto/
 _freeze
+*.gz
+*.zip
