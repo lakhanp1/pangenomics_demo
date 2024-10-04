@@ -62,4 +62,4 @@ echo
 # download and extract Pectobacterium pangenome data
 wget --no-check-certificate https://www.dropbox.com/scl/fi/1lo1seuw377nknmww4maj/pecto_demo.DB.tar.gz?rlkey=04biape32juhy5jo0o1dtqb7e -O data/pangenomes/pecto_demo/pecto_demo.DB.tar.gz
 
-tar -xzf data/pangenomes/pecto_demo/pecto_demo.DB.tar.gz -c data/pangenomes/pecto_demo/
+tar -xzf data/pangenomes/pecto_demo/pecto_demo.DB.tar.gz -C data/pangenomes/pecto_demo/
