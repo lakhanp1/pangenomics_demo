@@ -31,7 +31,7 @@ suppressPackageStartupMessages(library(ComplexHeatmap))
 rm(list = ls())
 
 source("https://raw.githubusercontent.com/lakhanp1/Pectobacterium_pangenome/refs/heads/main/scripts/utils/phylogeny_functions.R")
-source("scripts/utils/heatmap_utils.R")
+source("https://raw.githubusercontent.com/lakhanp1/pangenomics_demo/refs/heads/main/scripts/utils/heatmap_utils.R")
 ################################################################################
 set.seed(124)
 
